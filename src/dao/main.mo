@@ -10,6 +10,7 @@ import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Nat32 "mo:base/Nat32";
 import Iter "mo:base/Iter";
+import Int "mo:base/Int";
 
 actor DAO {
     type Result<A, B> = Result.Result<A, B>;
@@ -232,80 +233,92 @@ public shared func addInitialMentor() : async Result<(), Text> {
 
     // Vote for the given proposal
     // Returns an error if the proposal does not exist or the member is not allowed to vote
-    public shared ({ caller }) func voteProposal(proposalId: ProposalId, vote: Vote): async Result<(), Text> {
-        // Check if the caller is a member of the DAO
-        switch (members.get(caller)) {
-            case (null) {
-                return #err("The caller is not a member - cannot vote on the proposal");
-            };
-            case (?member) {
-                // Check if the proposal exists
-                switch (proposals.get(proposalId)) {
-                    case (null) {
-                        return #err("The proposal does not exist");
+  public shared ({ caller }) func voteProposal(proposalId: ProposalId, vote: Vote): async Result<(), Text> {
+    // Check if the caller is a member of the DAO
+    switch (members.get(caller)) {
+        case (null) {
+            return #err("The caller is not a member - cannot vote on the proposal");
+        };
+        case (?member) {
+            // Check if the proposal exists
+            switch (proposals.get(proposalId)) {
+                case (null) {
+                    return #err("The proposal does not exist");
+                };
+                case (?proposal) {
+                    // Check if the proposal is open for voting
+                    if (proposal.status != #Open) {
+                        return #err("The proposal is not open for voting");
                     };
-                    case (?proposal) {
-                        // Check if the proposal is open for voting
-                        if (proposal.status != #Open) {
-                            return #err("The proposal is not open for voting");
-                        };
-                        // Check if the caller has already voted
-                        if (_hasVoted(proposal, caller)) {
-                            return #err("The caller has already voted on this proposal");
-                        };
-                        
-                        // Check the caller's balance
-                        let balance = await faucet.balanceOf(caller);
-                        if (balance == 0) {
-                            return #err("Insufficient balance to vote on the proposal");
-                        };
-
-                        let multiplierVote: Int = switch (member.role) {
-                            case (#Student) { 0 };
-                            case (#Graduate) { balance };
-                            case (#Mentor) { balance * 5 };
-                        };
-
-                        let newVoteScore: Int = if (vote.yesOrNo) {
-                            proposal.voteScore + multiplierVote
-                        } else {
-                            proposal.voteScore - multiplierVote
-                        };
-
-                        var newExecuted: ?Time.Time = null;
-                        let newVotes = Buffer.fromArray<Vote>(proposal.votes);
-                        newVotes.add(vote);
-                        let newStatus = if (newVoteScore >= 100) {
-                            #Accepted;
-                        } else if (newVoteScore <= -100) {
-                            #Rejected;
-                        } else {
-                            #Open;
-                        };
-                        switch (newStatus) {
-                            case (#Accepted) {
-                                _executeProposal(proposal.content);
-                                newExecuted := ?Time.now();
-                            };
-                            case (_) {};
-                        };
-                        let newProposal: Proposal = {
-                            id = proposal.id;
-                            content = proposal.content;
-                            creator = proposal.creator;
-                            created = proposal.created;
-                            executed = newExecuted;
-                            votes = Buffer.toArray(newVotes);
-                            voteScore = newVoteScore;
-                            status = newStatus;
-                        };
-                        proposals.put(proposal.id, newProposal);
-                        return #ok();
+                    // Check if the caller has already voted
+                    if (_hasVoted(proposal, caller)) {
+                        return #err("The caller has already voted on this proposal");
                     };
+
+                    // Check the caller's balance
+                    let balance = await faucet.balanceOf(caller);
+                    if (balance == 0) {
+                        return #err("Insufficient balance to vote on the proposal");
+                    };
+
+                    // Determine the multiplierVote based on member role
+                    let multiplierVote: Nat = switch (member.role) {
+                        case (#Student) { 0 };
+                        case (#Graduate) { balance };
+                        case (#Mentor) { balance * 5 };
+                    };
+
+                    let newVote: Vote = {
+                        member = caller;
+                        votingPower = multiplierVote;
+                        yesOrNo = vote.yesOrNo;
+                    };
+
+                    // Adjust the vote score based on the new vote
+                    let newVoteScore: Int = if (vote.yesOrNo) {
+                        proposal.voteScore + Int.abs(multiplierVote)
+                    } else {
+                        proposal.voteScore - Int.abs(multiplierVote)
+                    };
+
+                    var newExecuted: ?Time.Time = null;
+                    let newVotes = Buffer.fromArray<Vote>(proposal.votes);
+                    newVotes.add(newVote);
+                    let newStatus = if (newVoteScore >= 100) {
+                        #Accepted;
+                    } else if (newVoteScore <= -100) {
+                        #Rejected;
+                    } else {
+                        #Open;
+                    };
+
+                    switch (newStatus) {
+                        case (#Accepted) {
+                            _executeProposal(proposal.content);
+                            newExecuted := ?Time.now();
+                        };
+                        case (_) {};
+                    };
+
+                    let newProposal: Proposal = {
+                        id = proposal.id;
+                        content = proposal.content;
+                        creator = proposal.creator;
+                        created = proposal.created;
+                        executed = newExecuted;
+                        votes = Buffer.toArray(newVotes);
+                        voteScore = newVoteScore;
+                        status = newStatus;
+                    };
+
+                    proposals.put(proposal.id, newProposal);
+                    return #ok();
                 };
             };
         };
     };
+};
+
 
     func _hasVoted(proposal : Proposal, member : Principal) : Bool {
         return Array.find<Vote>(
