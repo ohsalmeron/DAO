@@ -22,30 +22,30 @@ actor DAO {
     type HttpResponse = Types.HttpResponse;
 
     stable let initialMentorPrincipal: Principal = Principal.fromText("nkqop-siaaa-aaaaj-qa3qq-cai");
-    stable var initialMentorAdded: Bool = false;
-
 
     stable let canisterIdWebpage: Principal = Principal.fromText("ysmdh-qyaaa-aaaab-qacga-cai");
     stable var manifesto = "Your manifesto";
     stable let name = "Your DAO";
     stable var goals: [Text] = [];
 
-    // Function to add the initial mentor upon deployment
-    private func addInitialMentor() : () {
-        if (not initialMentorAdded) {
+// Function to add the initial mentor
+public shared func addInitialMentor() : async Result<(), Text> {
+    // Check if the initial mentor already exists
+    switch (members.get(initialMentorPrincipal)) {
+        case (null) {
+            // Add the initial mentor
             let initialMentor = {
                 name = "motoko_bootcamp";
                 role = #Mentor;
             };
             members.put(initialMentorPrincipal, initialMentor);
-            initialMentorAdded := true;
-        }
-    };
-
-    // Initialize the DAO with the initial mentor
-    public shared({}) func init(){
-        addInitialMentor();
-    };
+            return #ok(());
+        };
+        case (?_) {
+            return #err("Initial mentor already exists");
+        };
+    }
+};
 
     // Custom hash function for Nat values
     func customHashNat(x: Nat): Hash.Hash {
@@ -113,7 +113,7 @@ actor DAO {
                         ignore members.remove(caller);
                         return #err(errMsg);
                     };
-                    case (#ok) {
+                    case (#ok(())) {
                         return #ok(());
                     };
                 };
@@ -194,7 +194,7 @@ actor DAO {
             case (#err(errMsg)) {
                 return #err(errMsg);
             };
-            case (#ok) {};
+            case (#ok(())) {};
         };
 
         let proposal = {
@@ -260,13 +260,21 @@ actor DAO {
                             return #err("Insufficient balance to vote on the proposal");
                         };
 
-                        let multiplierVote = switch (vote.yesOrNo) {
-                            case (true) { 1 };
-                            case (false) { -1 };
+                        let multiplierVote: Int = switch (member.role) {
+                            case (#Student) { 0 };
+                            case (#Graduate) { balance };
+                            case (#Mentor) { balance * 5 };
                         };
-                        let newVoteScore = proposal.voteScore + balance * multiplierVote;
+
+                        let newVoteScore: Int = if (vote.yesOrNo) {
+                            proposal.voteScore + multiplierVote
+                        } else {
+                            proposal.voteScore - multiplierVote
+                        };
+
                         var newExecuted: ?Time.Time = null;
                         let newVotes = Buffer.fromArray<Vote>(proposal.votes);
+                        newVotes.add(vote);
                         let newStatus = if (newVoteScore >= 100) {
                             #Accepted;
                         } else if (newVoteScore <= -100) {
@@ -308,35 +316,34 @@ actor DAO {
         ) != null;
     };
 
-func _executeProposal(content : ProposalContent) : () {
-    switch (content) {
-        case (#ChangeManifesto(newManifesto)) {
-            manifesto := newManifesto;
-        };
-        case (#AddGoal(newGoal)) {
-            let buffer = Buffer.Buffer<Text>(goals.size() + 1); // Initialize buffer with extra capacity
-            for (goal in goals.vals()) {
-                buffer.add(goal);
+    func _executeProposal(content : ProposalContent) : () {
+        switch (content) {
+            case (#ChangeManifesto(newManifesto)) {
+                manifesto := newManifesto;
             };
-            buffer.add(newGoal); // Add the new goal
-            goals := Buffer.toArray(buffer); // Convert back to array
-        };
-        case (#AddMentor(newMentor)) {
-            switch (members.get(newMentor)) {
-                case (?grad) {
-                    if (grad.role == #Graduate) {
-                        members.put(newMentor, { name = grad.name; role = #Mentor });
+            case (#AddGoal(newGoal)) {
+                let buffer = Buffer.Buffer<Text>(goals.size() + 1); // Initialize buffer with extra capacity
+                for (goal in goals.vals()) {
+                    buffer.add(goal);
+                };
+                buffer.add(newGoal); // Add the new goal
+                goals := Buffer.toArray(buffer); // Convert back to array
+            };
+            case (#AddMentor(newMentor)) {
+                switch (members.get(newMentor)) {
+                    case (?grad) {
+                        if (grad.role == #Graduate) {
+                            members.put(newMentor, { name = grad.name; role = #Mentor });
+                        };
+                    };
+                    case (null) {
+                        // Handle case where the specified principal is not a member or not a Graduate
                     };
                 };
-                case (null) {
-                    // Handle case where the specified principal is not a member or not a Graduate
-                };
             };
         };
+        return;
     };
-    return;
-};
-
 
     // Returns the Principal ID of the Webpage canister associated with this DAO canister
     public query func getIdWebpage(): async Principal {
