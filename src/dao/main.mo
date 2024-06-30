@@ -2,7 +2,6 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Principal "mo:base/Principal";
 import Nat "mo:base/Nat";
-import Nat64 "mo:base/Nat64";
 import Array "mo:base/Array";
 import Types "types";
 import Buffer "mo:base/Buffer";
@@ -11,7 +10,6 @@ import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Nat32 "mo:base/Nat32";
 import Iter "mo:base/Iter";
-import Option "mo:base/Option";
 
 actor DAO {
     type Result<A, B> = Result.Result<A, B>;
@@ -23,10 +21,31 @@ actor DAO {
     type HttpRequest = Types.HttpRequest;
     type HttpResponse = Types.HttpResponse;
 
-    stable let canisterIdWebpage: Principal = Principal.fromText("aaaaa-aa");
+    stable let initialMentorPrincipal: Principal = Principal.fromText("nkqop-siaaa-aaaaj-qa3qq-cai");
+    stable var initialMentorAdded: Bool = false;
+
+
+    stable let canisterIdWebpage: Principal = Principal.fromText("ysmdh-qyaaa-aaaab-qacga-cai");
     stable var manifesto = "Your manifesto";
     stable let name = "Your DAO";
     stable var goals: [Text] = [];
+
+    // Function to add the initial mentor upon deployment
+    private func addInitialMentor() : () {
+        if (not initialMentorAdded) {
+            let initialMentor = {
+                name = "motoko_bootcamp";
+                role = #Mentor;
+            };
+            members.put(initialMentorPrincipal, initialMentor);
+            initialMentorAdded := true;
+        }
+    };
+
+    // Initialize the DAO with the initial mentor
+    public shared({}) func init(){
+        addInitialMentor();
+    };
 
     // Custom hash function for Nat values
     func customHashNat(x: Nat): Hash.Hash {
@@ -289,23 +308,35 @@ actor DAO {
         ) != null;
     };
 
-    func _executeProposal(content : ProposalContent) : () {
-        switch (content) {
-            case (#ChangeManifesto(newManifesto)) {
-                manifesto := newManifesto;
+func _executeProposal(content : ProposalContent) : () {
+    switch (content) {
+        case (#ChangeManifesto(newManifesto)) {
+            manifesto := newManifesto;
+        };
+        case (#AddGoal(newGoal)) {
+            let buffer = Buffer.Buffer<Text>(goals.size() + 1); // Initialize buffer with extra capacity
+            for (goal in goals.vals()) {
+                buffer.add(goal);
             };
-            case (#AddGoal(newGoal)) {
-                // Using Buffer to add a new goal
-                let buffer = Buffer.Buffer<Text>(goals.size() + 1); // Initialize buffer with extra capacity
-                for (goal in goals.vals()) {
-                    buffer.add(goal);
+            buffer.add(newGoal); // Add the new goal
+            goals := Buffer.toArray(buffer); // Convert back to array
+        };
+        case (#AddMentor(newMentor)) {
+            switch (members.get(newMentor)) {
+                case (?grad) {
+                    if (grad.role == #Graduate) {
+                        members.put(newMentor, { name = grad.name; role = #Mentor });
+                    };
                 };
-                buffer.add(newGoal); // Add the new goal
-                goals := Buffer.toArray(buffer); // Convert back to array
+                case (null) {
+                    // Handle case where the specified principal is not a member or not a Graduate
+                };
             };
         };
-        return;
     };
+    return;
+};
+
 
     // Returns the Principal ID of the Webpage canister associated with this DAO canister
     public query func getIdWebpage(): async Principal {
