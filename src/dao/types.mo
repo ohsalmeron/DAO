@@ -1,7 +1,7 @@
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
-module {
 
+module {
     public type Role = {
         #Student;
         #Graduate;
@@ -78,10 +78,4 @@ module {
         body : Blob;
         token : ?StreamingCallbackToken;
     };
-
-    type Result<T, E> = {
-    #ok: T;
-    #err: E;
-    };
-
 };

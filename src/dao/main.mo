@@ -23,32 +23,27 @@ actor DAO {
     type HttpResponse = Types.HttpResponse;
 
     stable let initialMentorPrincipal: Principal = Principal.fromText("nkqop-siaaa-aaaaj-qa3qq-cai");
-
     stable let canisterIdWebpage: Principal = Principal.fromText("ysmdh-qyaaa-aaaab-qacga-cai");
     stable var manifesto = "Your manifesto";
     stable let name = "Your DAO";
     stable var goals: [Text] = [];
 
-// Function to add the initial mentor
-public shared func addInitialMentor() : async Result<(), Text> {
-    // Check if the initial mentor already exists
-    switch (members.get(initialMentorPrincipal)) {
-        case (null) {
-            // Add the initial mentor
-            let initialMentor = {
-                name = "motoko_bootcamp";
-                role = #Mentor;
+    public shared func addInitialMentor() : async Result<(), Text> {
+        switch (members.get(initialMentorPrincipal)) {
+            case (null) {
+                let initialMentor = {
+                    name = "motoko_bootcamp";
+                    role = #Mentor;
+                };
+                members.put(initialMentorPrincipal, initialMentor);
+                return #ok(());
             };
-            members.put(initialMentorPrincipal, initialMentor);
-            return #ok(());
-        };
-        case (?_) {
-            return #err("Initial mentor already exists");
-        };
-    }
-};
+            case (?_) {
+                return #err("Initial mentor already exists");
+            };
+        }
+    };
 
-    // Custom hash function for Nat values
     func customHashNat(x: Nat): Hash.Hash {
         var hash: Nat32 = 0;
         var value = x;
@@ -69,7 +64,6 @@ public shared func addInitialMentor() : async Result<(), Text> {
     let proposals = HashMap.HashMap<ProposalId, Proposal>(0, Nat.equal, customHashNat);
     stable var nextProposalId: ProposalId = 0;
 
-    // The faucet canister
     let faucet = actor("jaamb-mqaaa-aaaaj-qa3ka-cai") : actor {
         mint: shared (to: Principal, amount: Nat) -> async Result<(), Text>;
         burn: shared (from: Principal, amount: Nat) -> async Result<(), Text>;
@@ -81,36 +75,25 @@ public shared func addInitialMentor() : async Result<(), Text> {
         transfer: shared (from: Principal, to: Principal, amount: Nat) -> async Result<(), Text>;
     };
 
-    // Returns the name of the DAO
     public query func getName(): async Text {
         return name;
     };
 
-    // Returns the manifesto of the DAO
     public query func getManifesto(): async Text {
         return manifesto;
     };
 
-    // Returns the goals of the DAO
     public query func getGoals(): async [Text] {
         return goals;
     };
 
-    // Register a new member in the DAO with the given name and principal of the caller
-    // Airdrop 10 MBC tokens to the new member
-    // New members are always Student
-    // Returns an error if the member already exists
     public shared ({ caller }) func registerMember(member: Member): async Result<(), Text> {
-        // Check if the member already exists
         switch (members.get(caller)) {
             case (null) {
-                // Add the new member
                 members.put(caller, { name = member.name; role = #Student });
-                // Mint tokens for the new member
                 let mintResult = await faucet.mint(caller, 10);
                 switch (mintResult) {
                     case (#err(errMsg)) {
-                        // Rollback the member addition if minting fails
                         ignore members.remove(caller);
                         return #err(errMsg);
                     };
@@ -125,8 +108,6 @@ public shared func addInitialMentor() : async Result<(), Text> {
         }
     };
 
-    // Get the member with the given principal
-    // Returns an error if the member does not exist
     public query func getMember(p: Principal): async Result<Member, Text> {
         switch (members.get(p)) {
             case (null) {
@@ -138,9 +119,6 @@ public shared func addInitialMentor() : async Result<(), Text> {
         }
     };
 
-    // Graduate the student with the given principal
-    // Returns an error if the student does not exist or is not a student
-    // Returns an error if the caller is not a mentor
     public shared ({ caller }) func graduate(student: Principal): async Result<(), Text> {
         switch (members.get(caller)) {
             case (?mentor) {
@@ -158,7 +136,6 @@ public shared func addInitialMentor() : async Result<(), Text> {
                 if (stud.role != #Student) {
                     return #err("Member is not a student");
                 };
-                // Update member role to Graduate
                 members.put(student, { name = stud.name; role = #Graduate });
                 return #ok(());
             };
@@ -168,10 +145,7 @@ public shared func addInitialMentor() : async Result<(), Text> {
         }
     };
 
-    // Create a new proposal and returns its id
-    // Returns an error if the caller is not a mentor or doesn't own at least 1 MBC token
     public shared ({ caller }) func createProposal(content: ProposalContent): async Result<ProposalId, Text> {
-        // Check if the caller is a member and a mentor
         switch (members.get(caller)) {
             case (?mentor) {
                 if (mentor.role != #Mentor) {
@@ -183,13 +157,11 @@ public shared func addInitialMentor() : async Result<(), Text> {
             };
         };
 
-        // Check the caller's balance
         let balance = await faucet.balanceOf(caller);
         if (balance < 1) {
             return #err("Insufficient balance to create a proposal");
         };
 
-        // Burn 1 token to create a proposal
         let burnResult = await faucet.burn(caller, 1);
         switch (burnResult) {
             case (#err(errMsg)) {
@@ -213,8 +185,6 @@ public shared func addInitialMentor() : async Result<(), Text> {
         return #ok(nextProposalId - 1);
     };
 
-    // Get the proposal with the given id
-    // Returns an error if the proposal does not exist
     public query func getProposal(id: ProposalId): async Result<Proposal, Text> {
         switch (proposals.get(id)) {
             case (null) {
@@ -226,99 +196,88 @@ public shared func addInitialMentor() : async Result<(), Text> {
         }
     };
 
-    // Returns all the proposals
     public query func getAllProposals(): async [Proposal] {
         return Iter.toArray(proposals.vals());
     };
 
-    // Vote for the given proposal
-    // Returns an error if the proposal does not exist or the member is not allowed to vote
-  public shared ({ caller }) func voteProposal(proposalId: ProposalId, vote: Vote): async Result<(), Text> {
-    // Check if the caller is a member of the DAO
-    switch (members.get(caller)) {
-        case (null) {
-            return #err("The caller is not a member - cannot vote on the proposal");
-        };
-        case (?member) {
-            // Check if the proposal exists
-            switch (proposals.get(proposalId)) {
-                case (null) {
-                    return #err("The proposal does not exist");
-                };
-                case (?proposal) {
-                    // Check if the proposal is open for voting
-                    if (proposal.status != #Open) {
-                        return #err("The proposal is not open for voting");
+    public shared ({ caller }) func voteProposal(proposalId: ProposalId, vote: Vote): async Result<(), Text> {
+        switch (members.get(caller)) {
+            case (null) {
+                return #err("The caller is not a member - cannot vote on the proposal");
+            };
+            case (?member) {
+                switch (proposals.get(proposalId)) {
+                    case (null) {
+                        return #err("The proposal does not exist");
                     };
-                    // Check if the caller has already voted
-                    if (_hasVoted(proposal, caller)) {
-                        return #err("The caller has already voted on this proposal");
-                    };
-
-                    // Check the caller's balance
-                    let balance = await faucet.balanceOf(caller);
-                    if (balance == 0) {
-                        return #err("Insufficient balance to vote on the proposal");
-                    };
-
-                    // Determine the multiplierVote based on member role
-                    let multiplierVote: Nat = switch (member.role) {
-                        case (#Student) { 0 };
-                        case (#Graduate) { balance };
-                        case (#Mentor) { balance * 5 };
-                    };
-
-                    let newVote: Vote = {
-                        member = caller;
-                        votingPower = multiplierVote;
-                        yesOrNo = vote.yesOrNo;
-                    };
-
-                    // Adjust the vote score based on the new vote
-                    let newVoteScore: Int = if (vote.yesOrNo) {
-                        proposal.voteScore + Int.abs(multiplierVote)
-                    } else {
-                        proposal.voteScore - Int.abs(multiplierVote)
-                    };
-
-                    var newExecuted: ?Time.Time = null;
-                    let newVotes = Buffer.fromArray<Vote>(proposal.votes);
-                    newVotes.add(newVote);
-                    let newStatus = if (newVoteScore >= 100) {
-                        #Accepted;
-                    } else if (newVoteScore <= -100) {
-                        #Rejected;
-                    } else {
-                        #Open;
-                    };
-
-                    switch (newStatus) {
-                        case (#Accepted) {
-                            _executeProposal(proposal.content);
-                            newExecuted := ?Time.now();
+                    case (?proposal) {
+                        if (proposal.status != #Open) {
+                            return #err("The proposal is not open for voting");
                         };
-                        case (_) {};
-                    };
+                        if (_hasVoted(proposal, caller)) {
+                            return #err("The caller has already voted on this proposal");
+                        };
 
-                    let newProposal: Proposal = {
-                        id = proposal.id;
-                        content = proposal.content;
-                        creator = proposal.creator;
-                        created = proposal.created;
-                        executed = newExecuted;
-                        votes = Buffer.toArray(newVotes);
-                        voteScore = newVoteScore;
-                        status = newStatus;
-                    };
+                        let balance = await faucet.balanceOf(caller);
+                        if (balance == 0) {
+                            return #err("Insufficient balance to vote on the proposal");
+                        };
 
-                    proposals.put(proposal.id, newProposal);
-                    return #ok();
+                        let multiplierVote: Nat = switch (member.role) {
+                            case (#Student) { 0 };
+                            case (#Graduate) { balance };
+                            case (#Mentor) { balance * 5 };
+                        };
+
+                        let newVote: Vote = {
+                            member = caller;
+                            votingPower = multiplierVote;
+                            yesOrNo = vote.yesOrNo;
+                        };
+
+                        let newVoteScore: Int = if (vote.yesOrNo) {
+                            proposal.voteScore + Int.abs(multiplierVote)
+                        } else {
+                            proposal.voteScore - Int.abs(multiplierVote)
+                        };
+
+                        var newExecuted: ?Time.Time = null;
+                        let newVotes = Buffer.fromArray<Vote>(proposal.votes);
+                        newVotes.add(newVote);
+                        let newStatus = if (newVoteScore >= 100) {
+                            #Accepted;
+                        } else if (newVoteScore <= -100) {
+                            #Rejected;
+                        } else {
+                            #Open;
+                        };
+
+                        switch (newStatus) {
+                            case (#Accepted) {
+                                _executeProposal(proposal.content);
+                                newExecuted := ?Time.now();
+                            };
+                            case (_) {};
+                        };
+
+                        let newProposal: Proposal = {
+                            id = proposal.id;
+                            content = proposal.content;
+                            creator = proposal.creator;
+                            created = proposal.created;
+                            executed = newExecuted;
+                            votes = Buffer.toArray(newVotes);
+                            voteScore = newVoteScore;
+                            status = newStatus;
+                        };
+
+                        proposals.put(proposal.id, newProposal);
+                        return #ok();
+                    };
                 };
             };
         };
     };
-};
-
 
     func _hasVoted(proposal : Proposal, member : Principal) : Bool {
         return Array.find<Vote>(
@@ -335,12 +294,12 @@ public shared func addInitialMentor() : async Result<(), Text> {
                 manifesto := newManifesto;
             };
             case (#AddGoal(newGoal)) {
-                let buffer = Buffer.Buffer<Text>(goals.size() + 1); // Initialize buffer with extra capacity
+                let buffer = Buffer.Buffer<Text>(goals.size() + 1);
                 for (goal in goals.vals()) {
                     buffer.add(goal);
                 };
-                buffer.add(newGoal); // Add the new goal
-                goals := Buffer.toArray(buffer); // Convert back to array
+                buffer.add(newGoal);
+                goals := Buffer.toArray(buffer);
             };
             case (#AddMentor(newMentor)) {
                 switch (members.get(newMentor)) {
@@ -349,16 +308,13 @@ public shared func addInitialMentor() : async Result<(), Text> {
                             members.put(newMentor, { name = grad.name; role = #Mentor });
                         };
                     };
-                    case (null) {
-                        // Handle case where the specified principal is not a member or not a Graduate
-                    };
+                    case (null) {};
                 };
             };
         };
         return;
     };
 
-    // Returns the Principal ID of the Webpage canister associated with this DAO canister
     public query func getIdWebpage(): async Principal {
         return canisterIdWebpage;
     };
